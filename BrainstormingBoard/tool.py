@@ -6,6 +6,10 @@ from langchain.tools import BaseTool
 import json
 import os
 
+# Use configurable data directory (respects STATE_DATA_DIR environment variable)
+DATA_DIR = os.environ.get("STATE_DATA_DIR", "data")
+CARDS_FILE = os.environ.get("CARDS_FILE", os.path.join(DATA_DIR, "cards.json"))
+
 
 class CardInput(BaseModel):
     name: str = Field(
@@ -25,15 +29,17 @@ class CardInput(BaseModel):
 class BaseCardTool(BaseTool):
     @staticmethod
     def _load_cards():
-        if os.path.exists("cards.json"):
-            with open("cards.json", 'r') as file:
+        if os.path.exists(CARDS_FILE):
+            with open(CARDS_FILE, 'r') as file:
                 return json.load(file)
         else:
             return {}
 
     @staticmethod
     def _save_cards(cards):
-        with open("cards.json", 'w') as file:
+        # Ensure data directory exists
+        os.makedirs(os.path.dirname(CARDS_FILE) or '.', exist_ok=True)
+        with open(CARDS_FILE, 'w') as file:
             json.dump(cards, file, indent=4)
 
     def _run(self, card_data: CardInput):
@@ -129,8 +135,8 @@ class ListCardTool(BaseTool):
 
     @staticmethod
     def _load_cards():
-        if os.path.exists("cards.json"):
-            with open("cards.json", 'r') as file:
+        if os.path.exists(CARDS_FILE):
+            with open(CARDS_FILE, 'r') as file:
                 return json.load(file)
         else:
             return {}

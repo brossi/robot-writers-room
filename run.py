@@ -1,4 +1,5 @@
 from typing import List, Callable
+import os
 
 from langchain import WikipediaAPIWrapper, PromptTemplate
 from langchain.chat_models import ChatOpenAI
@@ -17,12 +18,27 @@ from prompts import CHARACTER_DESIGNER_HUMAN_PROMPT, CHARACTER_DESIGNER_SYSTEM_P
     REFINER_SYSTEM_PROMPT, RESEARCHER_SYSTEM_PROMPT, SCRIBE_SYSTEM_PROMPT, CHAPTER_OUTLINER_SYSTEM_PROMPT, \
     CHAPTER_OUTLINER_HUMAN_PROMPT
 
-# Parameters
-ITERATIONS_FOR_BRAINSTORMING = 2
+# Configuration (read from environment with sensible defaults)
+LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4")
+LLM_STREAMING = os.environ.get("LLM_STREAMING", "true").lower() == "true"
+LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.7"))
 
-PAGES_PER_CHAPTER = 10
+# Story generation parameters
+ITERATIONS_FOR_BRAINSTORMING = int(os.environ.get("BRAINSTORM_ITERATIONS", "2"))
+PAGES_PER_CHAPTER = int(os.environ.get("PAGES_PER_CHAPTER", "10"))
+NUM_CHAPTERS = int(os.environ.get("NUM_CHAPTERS", "30"))
 
-NUM_CHAPTERS = 30
+
+def create_llm():
+    """Create a ChatOpenAI instance with configured parameters."""
+    kwargs = {
+        "model_name": LLM_MODEL,
+        "temperature": LLM_TEMPERATURE,
+    }
+    if LLM_STREAMING:
+        kwargs["streaming"] = True
+        kwargs["callbacks"] = [StreamingStdOutCallbackHandler()]
+    return ChatOpenAI(**kwargs)
 
 
 class DialogueSimulator:
@@ -73,21 +89,18 @@ if __name__ == "__main__":
     # Initialize our agents with their respective roles and system prompts
     brainstormer = DialogueAgent(name="Brainstormer",
                                  system_message=system_prompt_brainstormer,
-                                 model=ChatOpenAI(model_name='gpt-4', streaming=True,
-                                                  callbacks=[StreamingStdOutCallbackHandler()]))
+                                 model=create_llm())
 
     refiner = DialogueAgent(name="Refiner",
                             system_message=system_prompt_refiner,
-                            model=ChatOpenAI(model_name='gpt-4', streaming=True,
-                                             callbacks=[StreamingStdOutCallbackHandler()]))
+                            model=create_llm())
 
     # Define the tools for the researcher
     researcher_tools = [DuckDuckGoSearchRun(),
                         WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper()), WriteFileTool()]
     researcher = DialogueAgentWithTools(name="Researcher",
                                         system_message=system_prompt_researcher,
-                                        model=ChatOpenAI(model_name='gpt-4', streaming=True,
-                                                         callbacks=[StreamingStdOutCallbackHandler()]),
+                                        model=create_llm(),
                                         tools=researcher_tools)
 
     scribe_tools = [CreateCardTool(), ReadCardTool(), ListCardTool(), UpdateCardTool(), DeleteCardTool(),
@@ -95,8 +108,8 @@ if __name__ == "__main__":
 
     scribe = DialogueAgentWithTools(name="Scribe",
                                     system_message=system_prompt_scribe,
-                                    model=ChatOpenAI(model_name='gpt-4', streaming=True,
-                                                     callbacks=[StreamingStdOutCallbackHandler()]), tools=scribe_tools)
+                                    model=create_llm(),
+                                    tools=scribe_tools)
 
 
     # Define a round-robin selection function
@@ -130,8 +143,7 @@ if __name__ == "__main__":
     )
     scribe_tools = [ReadCardTool(), ListCardTool(), WriteFileTool()]
     outliner = DialogueAgentWithTools(name="Outliner", system_message=system_prompt_outliner,
-                                      model=ChatOpenAI(model_name='gpt-4', streaming=True,
-                                                       callbacks=[StreamingStdOutCallbackHandler()]),
+                                      model=create_llm(),
                                       tools=scribe_tools)
     outliner.receive("HumanUser",
                      OUTLINER_HUMAN_PROMPT)
@@ -150,8 +162,7 @@ if __name__ == "__main__":
                            DuckDuckGoSearchRun()]
 
     world_builder = DialogueAgentWithTools(name="WorldBuilder", system_message=system_prompt_world_builder,
-                                           model=ChatOpenAI(model_name='gpt-4', streaming=True,
-                                                            callbacks=[StreamingStdOutCallbackHandler()]),
+                                           model=create_llm(),
                                            tools=world_builder_tools)
     world_builder.receive("HumanUser",
                           WORLDBUILDER_HUMAN_PROMPT)
@@ -167,8 +178,7 @@ if __name__ == "__main__":
     character_designer_tools = [ReadFileTool(), WriteFileTool()]
     character_designer = DialogueAgentWithTools(name="CharacterDesigner",
                                                 system_message=system_prompt_character_designer,
-                                                model=ChatOpenAI(model_name='gpt-4', streaming=True,
-                                                                 callbacks=[StreamingStdOutCallbackHandler()]),
+                                                model=create_llm(),
                                                 tools=character_designer_tools)
     character_designer.receive("HumanUser",
                                CHARACTER_DESIGNER_HUMAN_PROMPT)
@@ -186,8 +196,7 @@ if __name__ == "__main__":
     chapter_outliner_tools = [ReadFileTool(), WriteFileTool()]
     chapter_outliner = DialogueAgentWithTools(name="ChapterOutliner",
                                               system_message=system_prompt_chapter_outliner,
-                                              model=ChatOpenAI(model_name='gpt-4', streaming=True,
-                                                               callbacks=[StreamingStdOutCallbackHandler()]),
+                                              model=create_llm(),
                                               tools=chapter_outliner_tools)
 
     chapter_outline_request_prompt = PromptTemplate(
