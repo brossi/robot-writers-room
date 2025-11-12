@@ -19,14 +19,14 @@ EVENTS_FILE = os.path.join(DEFAULT_DATA_DIR, "events.jsonl")
 CARDS_INDEX_FILE = os.path.join(DEFAULT_DATA_DIR, "cards.index.json")
 
 
-def _ensure_dirs():
+def _ensure_dirs(data_dir: str, events_file: str, cards_index_file: str):
     """Ensure data directory and files exist."""
-    os.makedirs(DEFAULT_DATA_DIR, exist_ok=True)
-    if not os.path.exists(EVENTS_FILE):
-        with open(EVENTS_FILE, "w", encoding="utf-8") as f:
+    os.makedirs(data_dir, exist_ok=True)
+    if not os.path.exists(events_file):
+        with open(events_file, "w", encoding="utf-8") as f:
             pass
-    if not os.path.exists(CARDS_INDEX_FILE):
-        with open(CARDS_INDEX_FILE, "w", encoding="utf-8") as f:
+    if not os.path.exists(cards_index_file):
+        with open(cards_index_file, "w", encoding="utf-8") as f:
             f.write("{}")
 
 
@@ -51,13 +51,12 @@ class JSONLStore(StateStore):
         Args:
             data_dir: Optional custom data directory (defaults to "data/")
         """
-        if data_dir:
-            global DEFAULT_DATA_DIR, EVENTS_FILE, CARDS_INDEX_FILE
-            DEFAULT_DATA_DIR = data_dir
-            EVENTS_FILE = os.path.join(DEFAULT_DATA_DIR, "events.jsonl")
-            CARDS_INDEX_FILE = os.path.join(DEFAULT_DATA_DIR, "cards.index.json")
+        # Use instance variables instead of mutating globals
+        self._data_dir = data_dir or DEFAULT_DATA_DIR
+        self._events_file = os.path.join(self._data_dir, "events.jsonl")
+        self._cards_index_file = os.path.join(self._data_dir, "cards.index.json")
 
-        _ensure_dirs()
+        _ensure_dirs(self._data_dir, self._events_file, self._cards_index_file)
 
         # Build minimal in-memory indices
         self._latest_by_sp: Dict[Tuple[str, str], Tuple[str, str]] = {}
@@ -68,26 +67,26 @@ class JSONLStore(StateStore):
     def _load_cards_index(self) -> Dict[str, Dict[str, Any]]:
         """Load the materialized card index from disk."""
         try:
-            with open(CARDS_INDEX_FILE, "r", encoding="utf-8") as f:
+            with open(self._cards_index_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
 
     def _save_cards_index(self) -> None:
         """Save the materialized card index to disk."""
-        tmp = CARDS_INDEX_FILE + ".tmp"
+        tmp = self._cards_index_file + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self._cards, f, indent=2, ensure_ascii=False)
-        os.replace(tmp, CARDS_INDEX_FILE)
+        os.replace(tmp, self._cards_index_file)
 
     def _append_line(self, d: Dict[str, Any]) -> None:
         """Append a single JSON object to the event log."""
-        with open(EVENTS_FILE, "a", encoding="utf-8") as f:
+        with open(self._events_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(d, ensure_ascii=False) + "\n")
 
     def _iter_events(self):
         """Iterate over all events in the log."""
-        with open(EVENTS_FILE, "r", encoding="utf-8") as f:
+        with open(self._events_file, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -179,15 +178,13 @@ class JSONLStore(StateStore):
                 meta=obj.get("meta") or {},
             ))
 
-            if len(out) >= limit:
-                break
-
+        # Sort first, then apply limit
         if newest_first:
             out.sort(key=lambda e: e.ts, reverse=True)
         else:
             out.sort(key=lambda e: e.ts)
 
-        return out
+        return out[:limit]
 
     def materialize(self, s: str, p: Optional[str] = None) -> Dict[str, Any]:
         """Get latest values for a subject.
@@ -205,8 +202,12 @@ class JSONLStore(StateStore):
         if not self._latest_by_sp:
             for obj in self._iter_events():
                 tr = obj.get("triple", [])
-                if len(tr) == 3 and obj.get("op") in ("set", "assert"):
-                    self._latest_by_sp[(tr[0], tr[1])] = (obj.get("ts"), tr[2])
+                if len(tr) == 3:
+                    op = obj.get("op")
+                    if op in ("set", "assert"):
+                        self._latest_by_sp[(tr[0], tr[1])] = (obj.get("ts"), tr[2])
+                    elif op == "retract":
+                        self._latest_by_sp.pop((tr[0], tr[1]), None)
 
         # Query the materialized index
         for (ss, pp), (ts, val) in self._latest_by_sp.items():
@@ -289,7 +290,7 @@ class JSONLStore(StateStore):
             List of recent events
         """
         lines: List[str] = []
-        with open(EVENTS_FILE, "rb") as f:
+        with open(self._events_file, "rb") as f:
             try:
                 f.seek(0, os.SEEK_END)
                 size = f.tell()

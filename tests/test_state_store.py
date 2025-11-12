@@ -270,6 +270,130 @@ def test_export(runner: TestRunner, store: JSONLStore):
     )
 
 
+def test_multiple_store_instances(runner: TestRunner):
+    """Test that multiple store instances with different directories don't interfere."""
+    runner.start_test("Multiple Store Instances (Bug #1)")
+
+    dir1 = tempfile.mkdtemp(prefix="store1_")
+    dir2 = tempfile.mkdtemp(prefix="store2_")
+
+    try:
+        # Create two separate stores
+        store1 = JSONLStore(data_dir=dir1)
+        store2 = JSONLStore(data_dir=dir2)
+
+        # Add different cards to each store
+        store1.upsert_card("card1", {"name": "Store 1 Card", "location": "dir1"})
+        store2.upsert_card("card2", {"name": "Store 2 Card", "location": "dir2"})
+
+        # Verify store1 has only its card
+        card1 = store1.read_card("card1")
+        runner.assert_equal(card1.get("name"), "Store 1 Card", "Store1 has its own card")
+
+        card2_in_store1 = store1.read_card("card2")
+        runner.assert_true(not card2_in_store1, "Store1 doesn't have store2's card")
+
+        # Verify store2 has only its card
+        card2 = store2.read_card("card2")
+        runner.assert_equal(card2.get("name"), "Store 2 Card", "Store2 has its own card")
+
+        card1_in_store2 = store2.read_card("card1")
+        runner.assert_true(not card1_in_store2, "Store2 doesn't have store1's card")
+
+        # Verify files are in correct directories
+        runner.assert_true(
+            os.path.exists(os.path.join(dir1, "events.jsonl")),
+            "Store1 events file exists in dir1"
+        )
+        runner.assert_true(
+            os.path.exists(os.path.join(dir2, "events.jsonl")),
+            "Store2 events file exists in dir2"
+        )
+
+    finally:
+        # Clean up
+        import shutil
+        if os.path.exists(dir1):
+            shutil.rmtree(dir1)
+        if os.path.exists(dir2):
+            shutil.rmtree(dir2)
+
+
+def test_query_newest_first(runner: TestRunner, store: JSONLStore):
+    """Test that newest_first actually returns the newest events (Bug #2)."""
+    runner.start_test("Query newest_first Correctness (Bug #2)")
+
+    # Create 10 events with explicit timestamps
+    for i in range(10):
+        ev = Event.new(
+            actor="TestAgent",
+            op="set",
+            triple=(f"card:time{i}", "index", str(i)),
+            meta={"tags": ["timetest"]},
+            ts=f"2025-11-12T10:00:{i:02d}Z"
+        )
+        store.append([ev])
+
+    # Query for 3 newest events
+    query: Query = {"tag": "timetest", "limit": 3, "newest_first": True}
+    results = store.query(query)
+
+    runner.assert_equal(len(results), 3, "Got exactly 3 events")
+
+    # Should get events 9, 8, 7 (newest to oldest)
+    if len(results) == 3:
+        indices = [e.triple[2] for e in results]
+        runner.assert_equal(indices[0], "9", "First result is index 9 (newest)")
+        runner.assert_equal(indices[1], "8", "Second result is index 8")
+        runner.assert_equal(indices[2], "7", "Third result is index 7")
+
+
+def test_retract_operations(runner: TestRunner):
+    """Test that retract operations work correctly (Bug #3)."""
+    runner.start_test("Retract Operations (Bug #3)")
+
+    test_dir = tempfile.mkdtemp(prefix="retract_test_")
+
+    try:
+        store = JSONLStore(data_dir=test_dir)
+
+        # Set a value
+        ev1 = Event.new(
+            actor="TestAgent",
+            op="set",
+            triple=("card:test", "property", "value1"),
+            meta={"tags": ["test"]}
+        )
+        store.append([ev1])
+
+        # Verify it exists
+        mat = store.materialize("card:test")
+        runner.assert_equal(mat.get("property"), "value1", "Property is set")
+
+        # Retract it
+        ev2 = Event.new(
+            actor="TestAgent",
+            op="retract",
+            triple=("card:test", "property", "value1"),
+            meta={"tags": ["test"]}
+        )
+        store.append([ev2])
+
+        # Verify it's gone
+        mat = store.materialize("card:test")
+        runner.assert_true("property" not in mat, "Property was retracted")
+
+        # Create a new store instance and verify retract persists
+        store2 = JSONLStore(data_dir=test_dir)
+        mat2 = store2.materialize("card:test")
+        runner.assert_true("property" not in mat2, "Retract persists across store instances")
+
+    finally:
+        import shutil
+        if os.path.exists(test_dir):
+            shutil.rmtree(test_dir)
+
+
 def main():
     """Run all tests."""
     print("\n" + "="*60)
@@ -285,13 +409,18 @@ def main():
         runner = TestRunner()
         store = JSONLStore(data_dir=test_dir)
 
-        # Run tests
+        # Run original tests
         test_event_creation(runner)
         test_store_append_and_query(runner, store)
         test_materialize(runner, store)
         test_card_operations(runner, store)
         test_tail(runner, store)
         test_export(runner, store)
+
+        # Run bug-specific tests
+        test_multiple_store_instances(runner)
+        test_query_newest_first(runner, store)
+        test_retract_operations(runner)
 
         # Print summary
         success = runner.print_summary()
