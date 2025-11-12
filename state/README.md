@@ -127,9 +127,50 @@ Run the test suite:
 python3 tests/test_state_store.py
 ```
 
+## Phase 2: Card Tools Integration (✅ COMPLETE)
+
+The Card Tools in `BrainstormingBoard/tool.py` now support **dual-write mode**:
+
+### How It Works
+
+1. **Writes go to both stores:**
+   - Legacy `cards.json` (backward compatible)
+   - StateStore `events.jsonl` + `cards.index.json` (event sourced)
+
+2. **Reads are configurable:**
+   - `USE_STATE_FOR_READS=false` (default): Read from legacy `cards.json`
+   - `USE_STATE_FOR_READS=true`: Read from StateStore with fallback
+
+3. **Graceful degradation:**
+   - If StateStore unavailable, falls back to legacy mode
+   - If StateStore read fails, falls back to legacy file
+   - Errors are logged but don't break agent workflows
+
+### Configuration
+
+```bash
+# Enable dual-write (writes to both stores)
+DUAL_WRITE=true  # Default: true
+
+# Read from StateStore instead of legacy cards.json
+USE_STATE_FOR_READS=false  # Default: false (use legacy)
+```
+
+### Testing
+
+Run the dual-write tests:
+```bash
+python3 tests/test_dual_write_simple.py
+```
+
+### Migration Path
+
+1. **Phase 2a (Current)**: Dual-write mode - write to both, read from legacy
+2. **Phase 2b (Next)**: Shadow mode - write to both, read from state (validate)
+3. **Phase 2c (Future)**: State-only mode - write/read only from state
+
 ## Next Steps
 
-- **Phase 2**: Integrate with Card Tools (dual-write mode)
 - **Phase 3**: Add CLI tools (`state_tail.py`, `export_cards.py`)
 - **Phase 4**: Context shard injection for agents
 - **Phase 5**: Full diegetic timestamp support
