@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+
+# Data and state files (local development)
+data/
+*.jsonl
+cards.json
+*.index.json
+
+# Output files
+research_notes.txt
+outline.txt
+refined_outline.txt
+stage2_outline.txt
+characters.txt
+detailed_chapter_outline.txt
+events.jsonl
+
+# Secrets
+secrets.json
+
+# OS
+.DS_Store
+Thumbs.db
